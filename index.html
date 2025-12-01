@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>My Gaussian Splat Viewer</title>
+
+    <!-- ✅ Import map (correct folder: libs/) -->
+    <script type="importmap">
+    {
+      "imports": {
+        "three": "./libs/three.module.js",
+        "@mkkellogg/gaussian-splats-3d": "./libs/gaussian-splats-3d.module.js"
+      }
+    }
+    </script>
+
+    <style>
+      body {
+        margin: 0;
+        overflow: hidden;
+        background-color: #000;
+      }
+      #progress {
+        position: absolute;
+        top: 10px;
+        left: 10px;
+        color: white;
+        font-family: monospace;
+      }
+    </style>
+  </head>
+
+  <body>
+    <div id="progress">Loading...</div>
+
+    <script type="module">
+      import * as THREE from "three";
+      import * as GaussianSplats3D from "@mkkellogg/gaussian-splats-3d";
+
+      // ✅ Create a new viewer
+      // Disable the built-in orbit controls so we can add FPS-style movement
+      const viewer = new GaussianSplats3D.Viewer({
+        'cameraUp': [0, 1, 0],
+        'initialCameraPosition': [1, 1, 2],
+        'initialCameraLookAt': [0, 0, 0],
+        'sphericalHarmonicsDegree': 2,
+        'useBuiltInControls': false
+      });
+
+      // ✅ Path to your .splat file (adjust name if needed)
+      const modelPath = "./assets/data/myModel/submission.splat";
+
+
+      viewer.addSplatScene(modelPath, { 'progressiveLoad': false })
+        .then(() => {
+          document.getElementById("progress").innerText = "✅ Loaded!";
+          viewer.start();
+          enableFlyingCamera(viewer);
+        })
+        .catch(err => {
+          console.error("Error loading splat:", err);
+          document.getElementById("progress").innerText = "❌ Failed to load splat";
+        });
+      // Flying camera controls: WASD for horizontal, Q/E for up/down, mouse for free look
+      function enableFlyingCamera(viewer) {
+        if (!viewer || !viewer.renderer) return;
+        const canvas = viewer.renderer.domElement;
+        canvas.tabIndex = 0;
+        canvas.style.cursor = 'crosshair';
+
+        let yaw = 0;
+        let pitch = 0;
+        let roll = 0;
+        const move = { forward: 0, back: 0, left: 0, right: 0, up: 0, down: 0 };
+        let sprint = false;
+        const sensitivity = 0.002;
+        const baseSpeed = 2.5;
+        let prevTime = performance.now();
+        let mouseActive = false;
+        let lastMouseX = 0, lastMouseY = 0;
+
+        function updateCameraQuaternion() {
+          const q = new THREE.Quaternion();
+          q.setFromEuler(new THREE.Euler(pitch, yaw, roll, 'YXZ'));
+          viewer.camera.quaternion.copy(q);
+        }
+
+        canvas.addEventListener('mousedown', e => {
+          mouseActive = true;
+          lastMouseX = e.clientX;
+          lastMouseY = e.clientY;
+        });
+        window.addEventListener('mouseup', () => { mouseActive = false; });
+        window.addEventListener('mousemove', e => {
+          if (!mouseActive) return;
+          // mouse X -> yaw, mouse Y -> pitch
+          yaw = (yaw - (e.clientX - lastMouseX) * sensitivity) % (Math.PI * 2);
+          pitch = (pitch - (e.clientY - lastMouseY) * sensitivity) % (Math.PI * 2);
+          lastMouseX = e.clientX;
+          lastMouseY = e.clientY;
+          updateCameraQuaternion();
+          viewer.forceRenderNextFrame();
+        });
+
+        window.addEventListener('keydown', e => {
+          const step = Math.PI / 36; // 5 degrees
+          switch (e.code) {
+            case 'KeyW': move.forward = 1; break;
+            case 'KeyS': move.back = 1; break;
+            case 'KeyA': move.left = 1; break;
+            case 'KeyD': move.right = 1; break;
+            case 'Space': move.up = 1; break; // Space = move up
+            case 'ControlLeft': case 'ControlRight': move.down = 1; break; // Ctrl = move down
+            case 'ShiftLeft': case 'ShiftRight': sprint = true; break;
+            case 'ArrowLeft':
+              yaw = (yaw + step) % (Math.PI * 2);
+              updateCameraQuaternion(); viewer.forceRenderNextFrame();
+              break;
+            case 'ArrowRight':
+              yaw = (yaw - step + Math.PI * 2) % (Math.PI * 2);
+              updateCameraQuaternion(); viewer.forceRenderNextFrame();
+              break;
+            case 'ArrowUp':
+              pitch = (pitch - step + Math.PI * 2) % (Math.PI * 2);
+              updateCameraQuaternion(); viewer.forceRenderNextFrame();
+              break;
+            case 'ArrowDown':
+              pitch = (pitch + step) % (Math.PI * 2);
+              updateCameraQuaternion(); viewer.forceRenderNextFrame();
+              break;
+            case 'KeyQ': // roll left
+              roll = (roll + step) % (Math.PI * 2);
+              updateCameraQuaternion(); viewer.forceRenderNextFrame();
+              break;
+            case 'KeyE': // roll right
+              roll = (roll - step + Math.PI * 2) % (Math.PI * 2);
+              updateCameraQuaternion(); viewer.forceRenderNextFrame();
+              break;
+          }
+        });
+        window.addEventListener('keyup', e => {
+          switch (e.code) {
+            case 'KeyW': move.forward = 0; break;
+            case 'KeyS': move.back = 0; break;
+            case 'KeyA': move.left = 0; break;
+            case 'KeyD': move.right = 0; break;
+            case 'Space': move.up = 0; break;
+            case 'ControlLeft': case 'ControlRight': move.down = 0; break;
+            case 'ShiftLeft': case 'ShiftRight': sprint = false; break;
+          }
+        });
+
+        function animate() {
+          const time = performance.now();
+          const delta = (time - prevTime) / 1000;
+          prevTime = time;
+          const speed = baseSpeed * (sprint ? 2.2 : 1.0);
+          const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(viewer.camera.quaternion);
+          const right = new THREE.Vector3(1, 0, 0).applyQuaternion(viewer.camera.quaternion);
+          const up = new THREE.Vector3(0, 1, 0);
+          const direction = new THREE.Vector3();
+          direction.addScaledVector(forward, (move.forward - move.back));
+          direction.addScaledVector(right, (move.right - move.left));
+          direction.addScaledVector(up, (move.up - move.down));
+          if (direction.lengthSq() > 0) {
+            direction.normalize();
+            viewer.camera.position.addScaledVector(direction, speed * delta);
+            viewer.forceRenderNextFrame();
+          }
+          requestAnimationFrame(animate);
+        }
+        // initialize yaw/pitch/roll from camera
+        const euler = new THREE.Euler().setFromQuaternion(viewer.camera.quaternion, 'YXZ');
+        pitch = euler.x;
+        yaw = euler.y;
+        roll = euler.z || 0;
+        updateCameraQuaternion();
+        prevTime = performance.now();
+        animate();
+      }
+
+      // Compute bounding box center and align model
+      let bboxCenter = new THREE.Vector3(0,0,0);
+      if (viewer.threeScene) {
+        const bbox = new THREE.Box3().setFromObject(viewer.threeScene);
+        bboxCenter = bbox.getCenter(new THREE.Vector3());
+        viewer.threeScene.position.sub(bboxCenter); // Center the model
+        // Draw central axis
+        const axisLength = bbox.getSize(new THREE.Vector3()).length() * 0.6;
+        const axes = [
+          { dir: new THREE.Vector3(1,0,0), color: 0xff0000 },
+          { dir: new THREE.Vector3(0,1,0), color: 0x00ff00 },
+          { dir: new THREE.Vector3(0,0,1), color: 0x0000ff }
+        ];
+        axes.forEach(axis => {
+          const mat = new THREE.LineBasicMaterial({ color: axis.color });
+          const points = [
+            new THREE.Vector3(0,0,0),
+            axis.dir.clone().multiplyScalar(axisLength)
+          ];
+          const geo = new THREE.BufferGeometry().setFromPoints(points);
+          const line = new THREE.Line(geo, mat);
+          viewer.threeScene.add(line);
+        });
+      }
+    </script>
+  </body>
+</html>
